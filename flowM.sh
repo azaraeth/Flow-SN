@@ -241,65 +241,6 @@ cmd_run() {
   fi
 }
 
-cmd_throw() {
-  require_init || return
-  local id="$1" lines="$2"
-  [[ -z "$id" ]] && { err "usage: throw <node> [lines 3-5]"; return; }
-  node_exists "$id" || { err "node '$id' not found"; return; }
-
-  local sub lang body
-  sub=$(node_subtype "$id"); lang=$(node_lang "$id"); body=$(node_body "$id")
-  [[ "$sub" != "script" ]] && { err "node '$id' is not a script node"; return; }
-  [[ -z "$body" ]] && { err "node '$id' has empty body"; return; }
-
-  local peek_lines=5
-  if [[ -n "$lines" ]]; then
-    [[ "$lines" =~ ^[0-9]+$ ]] || { err "lines must be a number (3-5)"; return; }
-    peek_lines="$lines"
-  fi
-  [[ $peek_lines -lt 3 ]] && peek_lines=3
-  [[ $peek_lines -gt 5 ]] && peek_lines=5
-
-  local log_file="$DATA/${id}_bg.log"
-  > "$log_file"
-
-  case "$lang" in
-    bash|sh)        bash    -c "$body" > "$log_file" 2>&1 & ;;
-    python|python3) python3 -u -c "$body" > "$log_file" 2>&1 & ;;
-    node|nodejs|js) node    -e "$body" > "$log_file" 2>&1 & ;;
-    ruby)           ruby    -e "$body" > "$log_file" 2>&1 & ;;
-    *)              bash    -c "$body" > "$log_file" 2>&1 & ;;
-  esac
-  local pid=$!
-
-  local waited=0
-  while [[ $waited -lt 30 ]]; do
-    sleep 0.1; waited=$((waited+1))
-    [[ $(wc -l < "$log_file" 2>/dev/null) -ge 1 ]] && break
-  done
-
-  local out_lines=()
-  if [[ -s "$log_file" ]]; then
-    local shown=0
-    while IFS= read -r oline; do
-      out_lines+=("$oline"); shown=$((shown+1))
-      [[ $shown -ge $peek_lines ]] && break
-    done < "$log_file"
-  fi
-  out_lines+=("${GY}⟳ running in background · PID: $pid${RS}")
-  out_lines+=("${GY}  log: ${log_file}${RS}")
-
-  hdr "throw [$PROJ]"
-  echo ""
-  echo -e "  ${GY}├ output ${WD}[${OR}${id}${WD}]${RS}"
-  for oline in "${out_lines[@]}"; do
-    echo -e "  ${GY}│${RS} ${WD}${oline}${RS}"
-  done
-  echo ""
-
-  disown $pid 2>/dev/null
-}
-
 
 # ═══════════════════════════════════════════════
 # RUNBG — FULLY BACKGROUND WORKFLOW EXECUTION
@@ -628,7 +569,6 @@ main() {
       tree)           cmd_tree ;;
       run)            cmd_run ;;
       runbg)          cmd_runbg ;;
-      throw|tfg)      cmd_throw "$arg1" "$arg2" ;;
       delete)         cmd_delete "$arg1" ;;
       export)         cmd_export "$arg1" ;;
       reset)          cmd_reset ;;

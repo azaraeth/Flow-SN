@@ -127,7 +127,6 @@ run
 | `tree` | Preview the workflow as a tree (no execution) |
 | `run` | Execute the workflow |
 | `export [file.sh]` | Export workflow to a standalone bash script |
-| `throw <node> [3-5]` | Throw-and-forget a script node (peek 3–5 lines, then detach) |
 | `reset` | Wipe all nodes and connections in the current project |
 
 ---
