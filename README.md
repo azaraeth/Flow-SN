@@ -1,4 +1,4 @@
-# ⬡ sn-flow v1.2.3
+### ⬡ FLOW-SN v1.2.3
 
 > Open source workflow environment for offline usage with multiple script compatibilities and background stable running content for better multi-tasking workflows.
 
