@@ -1,4 +1,4 @@
-#!/data/data/com.termux/files/usr/bin/bash
+#!/usr/bin/env bash
 # ╔══════════════════════════════════════════════╗
 # ║   flowM.sh  —  Flow Manager                  ║
 # ║   Execution Engine · Tree View · REPL        ║
