@@ -1,6 +1,6 @@
 # Security Policy
 
-## Project: snflow
+## Project: FLOW-SN
 **Maintained by:** SN (Solora Network) — @azaraeth
 
 ---
