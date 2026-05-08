@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # ╔══════════════════════════════════════════════╗
 # ║   UIM  —  UI Manager / Header File           ║
 # ║   Colors · Storage · Helpers                 ║
