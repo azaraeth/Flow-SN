@@ -1,9 +1,8 @@
 # ⬡ sn-flow
-V1.2.1
-
+V1.2.2
 > Open source workflow environment for offline usage with multiple script compatibilities and background stable running content for better multi-tasking workflows.
 
-Built for **Termux** on Android. No internet required. No cloud. Just your scripts, running the way you designed them.
+Built for **Termux** on Android and **Linux**. No internet required. No cloud. Just your scripts, running the way you designed them.
 
 ---
 
@@ -47,14 +46,23 @@ Data is stored at `~/.flowterm/<project>/` with one `.node` file per node and a 
 
 ## Installation
 
+**Termux (Android)**
 ```bash
-https://github.com/azaraeth/Flow-SN
-cd Flow-SN
-chmod +x flow flowM.sh flowmon commandM.sh UIM
+git clone <repo>
+cd flow
+chmod +x flow flowM.sh
 ./flow
 ```
 
-No package installs required. For script nodes you need the relevant runtime (`python3`, `node`, `ruby`) already available in your Termux environment.
+**Linux**
+```bash
+git clone <repo>
+cd flow
+chmod +x flow flowM.sh
+./flow
+```
+
+No package installs required. For script nodes you need the relevant runtime (`python3`, `node`, `ruby`) already available in your environment.
 
 ---
 
@@ -277,6 +285,10 @@ Defined in `UIM`:
 ---
 
 ## Changelog
+
+### v1.2.2
+- Linux compatibility — replaced hardcoded Termux shebangs with `#!/usr/bin/env bash`
+- Now runs on any system with bash installed
 
 ### v1.2.1
 - Added `decision` node type — conditional branching with true/false paths
