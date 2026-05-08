@@ -1,5 +1,5 @@
-# ⬡ sn-flow
-V1.2.2
+# ⬡ sn-flow v1.2.3
+
 > Open source workflow environment for offline usage with multiple script compatibilities and background stable running content for better multi-tasking workflows.
 
 Built for **Termux** on Android and **Linux**. No internet required. No cloud. Just your scripts, running the way you designed them.
@@ -285,6 +285,11 @@ Defined in `UIM`:
 ---
 
 ## Changelog
+
+### v1.2.3
+- Root detection on startup — shows `⚡ root access detected` if running as root or with passwordless sudo
+- Non-root devices show a friendly notice: `Non rooted device is also compatible for workflow environment`
+- Script nodes can use `sudo` commands naturally when root is available
 
 ### v1.2.2
 - Linux compatibility — replaced hardcoded Termux shebangs with `#!/usr/bin/env bash`
