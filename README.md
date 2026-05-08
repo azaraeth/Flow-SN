@@ -1,4 +1,5 @@
 # ⬡ sn-flow
+V1.2.1
 
 > Open source workflow environment for offline usage with multiple script compatibilities and background stable running content for better multi-tasking workflows.
 
@@ -47,9 +48,9 @@ Data is stored at `~/.flowterm/<project>/` with one `.node` file per node and a 
 ## Installation
 
 ```bash
-git clone <repo>
-cd flow
-chmod +x flow flowM.sh
+https://github.com/azaraeth/Flow-SN
+cd Flow-SN
+chmod +x flow flowM.sh flowmon commandM.sh UIM
 ./flow
 ```
 
