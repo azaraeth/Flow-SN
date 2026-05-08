@@ -1,4 +1,4 @@
-#!/data/data/com.termux/files/usr/bin/bash
+#!/usr/bin/env bash
 # ╔══════════════════════════════════════════════╗
 # ║   flowmon.sh  —  Flow Monitor                ║
 # ║   Background Run Manager · Live Logs · REPL  ║
