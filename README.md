@@ -231,7 +231,7 @@ tail -f ~/.flowterm/fetch_bg.log
 tail -f ~/.flowterm/check_decision.log
 ```
 
-For monitoring background runs launched with `runbg`, see [flowmon](./flowmon.sh) — the companion background run manager.
+For monitoring background runs launched with `runbg`, see [flowmon](https://github.com/azaraeth/Flowmon) — the companion background run manager.
 
 ---
 
