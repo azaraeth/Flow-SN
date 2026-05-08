@@ -287,8 +287,8 @@ Defined in `UIM`:
 ## Changelog
 
 ### v1.2.3
-- Root detection on startup — shows `⚡ root access detected` if running as root or with passwordless sudo
-- Non-root devices show a friendly notice: `Non rooted device is also compatible for workflow environment`
+- Root detection on startup — shows `⬡ root access detected` if running as root or with passwordless sudo
+- Non-root devices show a friendly notice: `❄Non rooted device is also compatible for workflow environment`
 - Script nodes can use `sudo` commands naturally when root is available
 
 ### v1.2.2
