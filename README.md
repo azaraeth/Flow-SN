@@ -1,4 +1,4 @@
-### ⬡ FLOW-SN v1.2.3
+## ⬡ FLOW-SN v1.2.3
 
 > Open source workflow environment for offline usage with multiple script compatibilities and background stable running content for better multi-tasking workflows.
 
@@ -6,7 +6,7 @@ Built for **Termux** on Android and **Linux**. No internet required. No cloud. J
 
 ---
 
-## What is sn-flow?
+## What is FLOW-SN?
 
 flow is a terminal-based workflow runner that lets you build, visualize, and execute pipelines made of connected nodes. Each node can run a script, output text, pass through silently, or branch conditionally. Nodes connect to form a graph — flow walks that graph and executes everything in order, printing a live tree as it goes.
 
