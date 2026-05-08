@@ -355,6 +355,7 @@ cmd_help() {
     "tree"                      "show current workflow as tree"
     "run"                       "execute the current workflow (foreground)"
     "runbg"                     "run workflow fully in background (detached)"
+    "throw <node> [3-5]"        "throw-and-forget a script node (peek 3–5 lines, then detach)"
     "delete <name>"             "remove a node"
     "export [file.sh]"          "export to runnable bash script"
     "reset"                     "wipe current project"
