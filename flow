@@ -1,4 +1,4 @@
-#!/data/data/com.termux/files/usr/bin/bash
+#!/usr/bin/env bash
 # ╔══════════════════════════════════════════════╗
 # ║   flow  —  Backwards Compatibility Wrapper   ║
 # ║   Redirects to flowM.sh                      ║
