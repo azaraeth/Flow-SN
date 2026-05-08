@@ -9,6 +9,22 @@ source "$SCRIPT_DIR/UIM"
 source "$SCRIPT_DIR/commandM.sh"
 
 # ═══════════════════════════════════════════════
+# ROOT DETECTION
+# ═══════════════════════════════════════════════
+
+_IS_ROOT=0
+_check_root() {
+  if [[ "$EUID" -eq 0 ]] || id | grep -q "uid=0"; then
+    _IS_ROOT=1
+  elif command -v sudo &>/dev/null && sudo -n true 2>/dev/null; then
+    _IS_ROOT=1
+  else
+    _IS_ROOT=0
+  fi
+}
+_check_root
+
+# ═══════════════════════════════════════════════
 # RUN — TREE-STYLE EXECUTION ENGINE
 # ═══════════════════════════════════════════════
 
@@ -521,6 +537,11 @@ main() {
   banner
   info "type ${OR}help${RS}${WD} for commands"
   info "project: ${OR}${PROJ}${RS}  |  data: ${GL}$DATA/$PROJ${RS}"
+  if [[ $_IS_ROOT -eq 1 ]]; then
+    echo -e "  ${OR}⬡${RS}  ${OR}root access detected — sudo commands available in script nodes${RS}"
+  else
+    echo -e "  ${BL}❄${RS}  ${BL}Non rooted device is also compatible for workflow environment${RS}"
+  fi
   echo ""
 
   while true; do
