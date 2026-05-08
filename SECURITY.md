@@ -1,21 +1,36 @@
 # Security Policy
-
 ## Project: FLOW-SN
-**Maintained by:** SN (Solora Network) — @azaraeth
+**Maintained by:** SN (Solora Network) — [@azaraeth](https://github.com/azaraeth)
 
 ---
 
 ## ⚠️ Educational Use Only
 
 This project is intended **strictly for educational and research purposes**.
-The tools, scripts, or techniques provided here are meant to help people
-learn and understand security concepts in a controlled, legal environment.
+The tools, scripts, and techniques provided here exist to help people learn and
+understand automation and workflow concepts in a controlled, legal environment.
 
-**The maintainers of snflow do not condone, support, or encourage any illegal,
+**The maintainers of Flow-SN do not condone, support, or encourage any illegal,
 malicious, or unethical use of this software.** Any misuse of this project is
 solely the responsibility of the individual involved. SN (Solora Network) and
 its contributors shall not be held liable for any damages or legal consequences
-arising from the misuse of this software.
+arising from misuse of this software.
+
+---
+
+## 🚫 Misuse Policy
+
+Unauthorized, malicious, or unlawful use of this project is **strictly prohibited**
+and may result in:
+
+- **Civil liability** — the affected party (victim) may pursue legal action against you
+- **Legal action by the creator** — SN (Solora Network) reserves the right to pursue
+  action against any individual found misusing this software in violation of applicable law
+- **Permanent ban** from all project spaces, repositories, and communities maintained
+  by SN (Solora Network)
+
+If you are found to be using Flow-SN to harm, exploit, or compromise systems without
+explicit authorization, you do so entirely at your own legal risk.
 
 ---
 
@@ -23,28 +38,30 @@ arising from the misuse of this software.
 
 By using this project, you agree to:
 
-- Use it **only in environments you own or have explicit permission to test**
-- Not use it to harm, exploit, or compromise systems without authorization
+- Use it **only in environments you own or have explicit written permission to access**
+- Not use it to harm, exploit, or compromise any system without authorization
 - Comply with all applicable local, national, and international laws
-- Use it **ethically and responsibly** at all times
+- Act **ethically and responsibly** at all times
 
 ---
 
 ## Reporting a Vulnerability
 
-If you discover a vulnerability or security issue **within this project itself**,
-please report it responsibly instead of disclosing it publicly.
+If you discover a security issue **within this project itself**, please report it
+responsibly rather than disclosing it publicly.
 
 **To report a vulnerability:**
+
 - Open a **private security advisory** on GitHub
-- Or contact the maintainer directly via GitHub: [@azaraeth](https://github.com/azaraeth)
+- Or contact the maintainer directly: [@azaraeth](https://github.com/azaraeth)
 
 Please include:
+
 - A clear description of the issue
 - Steps to reproduce
 - Potential impact
 
-We will review and respond to reports as quickly as possible.
+We will review and respond as quickly as possible.
 
 ---
 
