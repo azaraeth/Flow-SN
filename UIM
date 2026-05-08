@@ -1,0 +1,149 @@
+#!/bin/bash
+# ╔══════════════════════════════════════════════╗
+# ║   UIM  —  UI Manager / Header File           ║
+# ║   Colors · Storage · Helpers                 ║
+# ║   Source this file, don't execute directly   ║
+# ╚══════════════════════════════════════════════╝
+
+# ── Colors ─────────────────────────────────────
+OR='\033[38;5;208m'   # orange
+OD='\033[38;5;166m'   # orange dim
+GR='\033[38;5;114m'   # green
+RE='\033[38;5;203m'   # red
+BL='\033[38;5;111m'   # blue
+GL='\033[38;5;245m'   # grey light
+GY='\033[38;5;240m'   # grey
+WH='\033[38;5;255m'   # white
+WD='\033[38;5;250m'   # white dim
+CY='\033[38;5;87m'    # cyan — decision nodes
+BD='\033[1m'
+DM='\033[2m'
+RS='\033[0m'
+
+# ── Storage ─────────────────────────────────────
+DATA="$HOME/.flowterm"
+PROJ="project1"
+
+use_proj() {
+    PROJ="$1"
+    NODES="$DATA/$PROJ/nodes"
+    CONNS="$DATA/$PROJ/connections"
+    mkdir -p "$NODES"
+    touch "$CONNS"
+}
+
+# ── migrate legacy flat structure on first run ──
+migrate_legacy() {
+    [[ -d "$DATA/nodes" && ! -d "$DATA/project1" ]] || return
+    mkdir -p "$DATA/project1"
+    mv "$DATA/nodes" "$DATA/project1/nodes"
+    [[ -f "$DATA/connections" ]] && mv "$DATA/connections" "$DATA/project1/connections"
+    touch "$DATA/project1/connections"
+}
+migrate_legacy
+
+# ── initial project ──
+use_proj "project1"
+
+# ═══════════════════════════════════════════════
+# HELPERS
+# ═══════════════════════════════════════════════
+
+ok()   { echo -e "  ${GR}✓${RS}  ${WH}$*${RS}"; }
+err()  { echo -e "  ${RE}✗${RS}  ${RE}$*${RS}"; }
+info() { echo -e "  ${GL}·${RS}  ${WD}$*${RS}"; }
+warn() { echo -e "  ${OD}!${RS}  ${OD}$*${RS}"; }
+
+hdr()  {
+  echo ""
+  echo -e "  ${OR}${BD}── $* ${RS}${GY}────────────────────────────────${RS}"
+}
+
+div()  { echo -e "  ${GY}${DM}────────────────────────────────────────${RS}"; }
+
+banner() {
+  clear
+  echo -e "${OR}${BD}"
+  echo -e "     ███████╗███╗   ██╗      ███████╗██╗      ██████╗ ██╗    ██╗"
+  echo -e "     ██╔════╝████╗  ██║      ██╔════╝██║     ██╔═══██╗██║    ██║"
+  echo -e "     ███████╗██╔██╗ ██║█████╗█████╗  ██║     ██║   ██║██║ █╗ ██║"
+  echo -e "     ╚════██║██║╚██╗██║╚════╝██╔══╝  ██║     ██║   ██║██║███╗██║"
+  echo -e "     ███████║██║ ╚████║      ██║     ███████╗╚██████╔╝╚███╔███╔╝"
+  echo -e "     ╚══════╝╚═╝  ╚═══╝      ╚═╝     ╚══════╝ ╚═════╝  ╚══╝╚══╝ "
+  echo -e "     V1.0 BETA-OPENSOURCE"
+  echo -e "────────────────────────────────────────────────────────────────────"                                         
+  echo -e "     ⬡  sn-flow${RS}${WD}${RS}${OR}${BD}  ·  workflow runner"
+  echo -e "        ${RS}${GL}Created by : Azaraeth${RS}${OR}${BD} ${RS}"
+  echo -e "────────────────────────────────────────────────────────────────────"
+  echo ""
+}
+
+prompt_line() {
+  local status=""
+  if [[ -d "$DATA/$PROJ" ]]; then
+    if node_exists "start" 2>/dev/null; then
+      status="${GR}●${RS}"
+    else
+      status="${OD}○${RS}"
+    fi
+  fi
+  echo ""
+  echo -ne "  ${status} ${OR}${BD}▶${RS} "
+}
+
+node_file()    { echo "$NODES/$1.node"; }
+node_exists()  { [[ -f "$NODES/$1.node" ]]; }
+node_type()    { sed -n '1p' "$NODES/$1.node" 2>/dev/null; }
+node_subtype() { sed -n '2p' "$NODES/$1.node" 2>/dev/null; }
+node_lang()    { sed -n '3p' "$NODES/$1.node" 2>/dev/null; }
+node_body()    { tail -n +4 "$NODES/$1.node" 2>/dev/null; }
+
+node_save() {
+  local name="$1" type="$2" sub="$3" lang="$4"
+  shift 4
+  printf '%s\n%s\n%s\n%s\n' "$type" "$sub" "$lang" "$*" > "$NODES/$name.node"
+}
+
+node_list() { ls "$NODES"/*.node 2>/dev/null | xargs -I{} basename {} .node; }
+
+node_delete() {
+  rm -f "$NODES/$1.node"
+  grep -v "^$1 \|^[^ ]* $1$" "$CONNS" > "$CONNS.tmp" 2>/dev/null
+  mv "$CONNS.tmp" "$CONNS"
+}
+
+require_init() {
+  node_exists "start" || { err "project not initialized — use: init $PROJ"; return 1; }
+}
+
+conn_add() {
+  # $1=from  $2=to  $3=branch (optional: true|false)
+  local branch="${3:-}"
+  local entry="$1 $2${branch:+ $branch}"
+  # prevent exact duplicate
+  grep -qx "$entry" "$CONNS" 2>/dev/null && { warn "already linked: $1 → $2${branch:+ [$branch]}"; return 1; }
+  echo "$entry" >> "$CONNS"
+}
+
+conn_remove() {
+  # removes any connection from $1 to $2 regardless of branch tag
+  grep -v "^$1 $2\( .*\)\?$" "$CONNS" > "$CONNS.tmp" 2>/dev/null
+  mv "$CONNS.tmp" "$CONNS"
+}
+
+# conn_out <node>          — all children regardless of branch
+# conn_out <node> true     — only true-branch children
+# conn_out <node> false    — only false-branch children
+conn_out() {
+  local node="$1" branch="${2:-}"
+  if [[ -z "$branch" ]]; then
+    grep "^$node " "$CONNS" 2>/dev/null | awk '{print $2}'
+  else
+    grep "^$node " "$CONNS" 2>/dev/null | awk -v b="$branch" '$3==b{print $2}'
+  fi
+}
+
+conn_in()  { grep " $1 \| $1$" "$CONNS" 2>/dev/null | awk '{print $1}'; }
+
+# returns the branch tag for a specific connection (true/false/empty)
+conn_branch() { grep "^$1 $2" "$CONNS" 2>/dev/null | awk '{print $3}'; }
