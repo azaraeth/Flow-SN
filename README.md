@@ -377,7 +377,6 @@ clean                       # remove all finished runs
 - **conn_in uses exact field matching** — same fix as node_delete for the reverse lookup
 - **migrate_legacy improved** — migration from the old flat file structure now checks for the `project1/nodes` directory specifically, not just `project1`, preventing skipped migrations
 - **conn_out documentation** — added a note that callers should pass `"true"` or `"false"` for decision nodes to avoid mixing branches
-- **Banner version updated** — now shows `V1.2.3 OPENSOURCE` to match the actual release version
 
 ### v1.2.3
 - Root detection on startup — shows `⬡ root access detected` if running as root or with passwordless sudo
