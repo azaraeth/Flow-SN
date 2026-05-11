@@ -39,6 +39,11 @@ _exec_node() {
     return
   fi
 
+  # ── variable nodes are not executed directly ──
+  if [[ "$sub" == "variable" ]]; then
+    return
+  fi
+
   _print_output_block() {
     local label="$1"; shift
     local lines=("$@")
@@ -49,27 +54,35 @@ _exec_node() {
   }
 
   if [[ "$sub" == "script" && -n "$body" ]]; then
+    # ── resolve imports (variables + decisions) ──
+    local resolved_body
+    resolved_body=$(resolve_imports "$body" "$lang")
+
     local log_file="$DATA/${id}_bg.log"
     > "$log_file"
 
     local is_bg=0
+    # detect loops: skip lines that are comments or inside strings
+    # only check actual code lines for loop keywords
+    local _check_body
+    _check_body=$(echo "$resolved_body" | sed 's/#.*$//' | grep -vE '^\s*$')
     case "$lang" in
-      bash|sh)        echo "$body" | grep -qE '^\s*(while|for|until)\b'      && is_bg=1 ;;
-      python|python3) echo "$body" | grep -qE '^\s*(while|for)\b'            && is_bg=1 ;;
-      node|nodejs|js) echo "$body" | grep -qE '(while\s*\(|for\s*\()'       && is_bg=1 ;;
-      ruby)           echo "$body" | grep -qE '(while\s|\.each\s|\.times)'   && is_bg=1 ;;
-      *)              echo "$body" | grep -qE '\b(while|for|until)\b'         && is_bg=1 ;;
+      bash|sh)        echo "$_check_body" | grep -qE '^\s*(while|for|until)\b'      && is_bg=1 ;;
+      python|python3) echo "$_check_body" | grep -qE '^\s*(while|for)\b'            && is_bg=1 ;;
+      node|nodejs|js) echo "$_check_body" | grep -qE '(while\s*\(|for\s*\()'       && is_bg=1 ;;
+      ruby)           echo "$_check_body" | grep -qE '(while\s|\.each\s|\.times)'   && is_bg=1 ;;
+      *)              echo "$_check_body" | grep -qE '\b(while|for|until)\b'         && is_bg=1 ;;
     esac
     local word_count
-    word_count=$(echo "$body" | wc -w)
+    word_count=$(echo "$resolved_body" | wc -w)
     [[ $word_count -le 3 ]] && is_bg=1
 
     case "$lang" in
-      bash|sh)        bash    -c "$body" > "$log_file" 2>&1 & ;;
-      python|python3) python3 -u -c "$body" > "$log_file" 2>&1 & ;;
-      node|nodejs|js) node    -e "$body" > "$log_file" 2>&1 & ;;
-      ruby)           ruby    -e "$body" > "$log_file" 2>&1 & ;;
-      *)              bash    -c "$body" > "$log_file" 2>&1 & ;;
+      bash|sh)        bash    -c "$resolved_body" > "$log_file" 2>&1 & ;;
+      python|python3) python3 -u -c "$resolved_body" > "$log_file" 2>&1 & ;;
+      node|nodejs|js) node    -e "$resolved_body" > "$log_file" 2>&1 & ;;
+      ruby)           ruby    -e "$resolved_body" > "$log_file" 2>&1 & ;;
+      *)              bash    -c "$resolved_body" > "$log_file" 2>&1 & ;;
     esac
     local pid=$!
 
@@ -109,6 +122,11 @@ _exec_node() {
     local text_lines=()
     while IFS= read -r tline; do text_lines+=("$tline"); done <<< "$body"
     _print_output_block "$id" "${text_lines[@]}"
+  elif [[ "$sub" == "sleep" ]]; then
+    local dur="${body:-0}"
+    _print_output_block "$id" "${GY}sleeping ${dur}s...${RS}"
+    sleep "$dur"
+    _print_output_block "$id" "${GR}✓ done sleeping (${dur}s)${RS}"
   fi
 }
 
@@ -124,6 +142,11 @@ run_node() {
   local type sub lang body
   type=$(node_type   "$id"); sub=$(node_subtype "$id")
   lang=$(node_lang   "$id"); body=$(node_body   "$id")
+
+  # ── skip variable nodes during graph traversal ──
+  if [[ "$sub" == "variable" ]]; then
+    return
+  fi
 
   case "$type" in
     start)
@@ -215,7 +238,7 @@ run_node() {
   local children=()
   mapfile -t children < <(conn_out "$id")
   local n=${#children[@]}
-
+  local i
   for (( i=0; i<n; i++ )); do
     local next="${children[$i]}"
     local child_is_last=0
@@ -236,9 +259,10 @@ cmd_run() {
   run_node "start" "" "" "1"
   if node_exists "end"; then
     _run_counter=$((_run_counter+1))
-    echo -e "    ${GY}\u2514\u2500\u2500 ${RS}${GR}${BD}${_run_counter}.${RS} ${GR}${OR}end${RS} ${GR}✓ workflow complete${RS}"
+    echo -e "    ${GY}\\u2514\\u2500\\u2500 ${RS}${GR}${BD}${_run_counter}.${RS} ${GR}${OR}end${RS} ${GR}✓ workflow complete${RS}"
     echo ""
   fi
+  _print_connections_summary
 }
 
 
@@ -247,7 +271,7 @@ cmd_run() {
 # ═══════════════════════════════════════════════
 #
 #  Each background run gets a unique session dir:
-#    ~/.flowterm/runs/<proj>_<timestamp>/
+#    ~/.flowterm/runs/<proj_<timestamp>/
 #      meta              — proj, run_id, started, pid
 #      run.log           — top-level execution log
 #      workflow.status   — RUNNING | COMPLETE | ERROR
@@ -267,6 +291,13 @@ _bg_exec_node() {
   echo "[$(date '+%H:%M:%S')] START node: $id  sub=$sub  lang=$lang" >> "$node_log"
   echo "RUNNING" > "$log_dir/node_${id}.status"
 
+  # ── variable nodes are not executed directly ──
+  if [[ "$sub" == "variable" ]]; then
+    echo "[$(date '+%H:%M:%S')] PASS (variable — not executable)" >> "$node_log"
+    echo "DONE" > "$log_dir/node_${id}.status"
+    return
+  fi
+
   if [[ "$sub" == "passthrough" || -z "$sub" || -z "$body" ]]; then
     echo "[$(date '+%H:%M:%S')] PASS (passthrough / no body)" >> "$node_log"
     echo "DONE" > "$log_dir/node_${id}.status"
@@ -274,14 +305,18 @@ _bg_exec_node() {
   fi
 
   if [[ "$sub" == "script" && -n "$body" ]]; then
+    # ── resolve imports (variables + decisions) ──
+    local resolved_body
+    resolved_body=$(resolve_imports "$body" "$lang")
+
     echo "RUNNING" > "$log_dir/node_${id}.status"
     echo "[$(date '+%H:%M:%S')] EXEC script [$lang]" >> "$node_log"
     case "$lang" in
-      bash|sh)        bash    -c "$body" >> "$node_log" 2>&1 ;;
-      python|python3) python3 -u -c "$body" >> "$node_log" 2>&1 ;;
-      node|nodejs|js) node    -e "$body" >> "$node_log" 2>&1 ;;
-      ruby)           ruby    -e "$body" >> "$node_log" 2>&1 ;;
-      *)              bash    -c "$body" >> "$node_log" 2>&1 ;;
+      bash|sh)        bash    -c "$resolved_body" >> "$node_log" 2>&1 ;;
+      python|python3) python3 -u -c "$resolved_body" >> "$node_log" 2>&1 ;;
+      node|nodejs|js) node    -e "$resolved_body" >> "$node_log" 2>&1 ;;
+      ruby)           ruby    -e "$resolved_body" >> "$node_log" 2>&1 ;;
+      *)              bash    -c "$resolved_body" >> "$node_log" 2>&1 ;;
     esac
     local exit_code=$?
     echo "[$(date '+%H:%M:%S')] EXIT code=$exit_code" >> "$node_log"
@@ -296,17 +331,40 @@ _bg_exec_node() {
     echo "[$(date '+%H:%M:%S')] TEXT output:" >> "$node_log"
     echo "$body" >> "$node_log"
     echo "DONE" > "$log_dir/node_${id}.status"
+  elif [[ "$sub" == "sleep" ]]; then
+    local dur="${body:-0}"
+    echo "[$(date '+%H:%M:%S')] SLEEP ${dur}s" >> "$node_log"
+    sleep "$dur" 2>> "$node_log"
+    echo "[$(date '+%H:%M:%S')] EXIT code=$?" >> "$node_log"
+    echo "DONE" > "$log_dir/node_${id}.status"
   fi
 }
 
 _bg_run_traversal() {
   local log_dir="$1"
   local _bgv=()
+  # use snapshot copies so the run is isolated from live edits
+  local _bg_nodes_dir="$log_dir/snapshot_nodes"
+  local _bg_conns="$log_dir/snapshot_connections"
+
+  # build snapshot: copy node files and connections into a private dir
+  mkdir -p "$_bg_nodes_dir"
+  for nf in "$NODES"/*.node; do
+    [[ -f "$nf" ]] && cp "$nf" "$_bg_nodes_dir/$(basename "$nf")"
+  done
+  cp "$CONNS" "$_bg_conns" 2>/dev/null || touch "$_bg_conns"
 
   _bgvisit() {
     local id="$1"
     for v in "${_bgv[@]}"; do [[ "$v" == "$id" ]] && return; done
     _bgv+=("$id")
+
+    # ── skip variable nodes during graph traversal ──
+    [[ "$id" != "end" ]] && {
+      local _bv_sub
+      _bv_sub=$(sed -n '2p' "$_bg_nodes_dir/${id}.node" 2>/dev/null)
+      [[ "$_bv_sub" == "variable" ]] && return
+    }
 
     [[ "$id" == "end" ]] && {
       echo "[$(date '+%H:%M:%S')] REACHED end node" >> "$log_dir/run.log"
@@ -315,15 +373,19 @@ _bg_run_traversal() {
       return
     }
 
-    if ! node_exists "$id"; then
+    # read node data from snapshot, not live filesystem
+    local node_file="$_bg_nodes_dir/${id}.node"
+    if [[ ! -f "$node_file" ]]; then
       echo "[$(date '+%H:%M:%S')] ERROR: node '$id' missing" >> "$log_dir/run.log"
       echo "ERROR:missing" > "$log_dir/node_${id}.status"
       return
     fi
 
     local type sub lang body
-    type=$(node_type   "$id"); sub=$(node_subtype "$id")
-    lang=$(node_lang   "$id"); body=$(node_body   "$id")
+    type=$(sed -n '1p' "$node_file" 2>/dev/null)
+    sub=$(sed -n '2p' "$node_file" 2>/dev/null)
+    lang=$(sed -n '3p' "$node_file" 2>/dev/null)
+    body=$(tail -n +4 "$node_file" 2>/dev/null)
 
     echo "PENDING" > "$log_dir/node_${id}.status"
     echo "[$(date '+%H:%M:%S')] NODE $id  type=$type" >> "$log_dir/run.log"
@@ -339,7 +401,9 @@ _bg_run_traversal() {
       return
     fi
 
-    mapfile -t kids < <(conn_out "$id")
+    # read connections from snapshot
+    local kids=()
+    mapfile -t kids < <(grep "^$id " "$_bg_conns" 2>/dev/null | awk '{print $2}')
     for k in "${kids[@]}"; do _bgvisit "$k"; done
   }
 
@@ -382,13 +446,22 @@ cmd_runbg() {
   echo "$run_id" >> "$DATA/runs/.registry"
 
   # launch fully detached
-  # NOTE: source UIM unconditionally resets PROJ to "project1" at the bottom,
-  # so we capture the correct project name before forking the subshell.
-  local _bg_proj="$PROJ"
+  # Export functions needed by the subshell (bash -c starts a new process
+  # that does NOT inherit shell functions from the parent).
+  # commandM.sh provides: resolve_imports + import helpers
+  # flowM.sh provides:     _bg_run_traversal, _bg_exec_node
+  export -f _bg_run_traversal _bg_exec_node
+
+  # Pass project name and log directory via environment variables so the
+  # subshell sets up correctly regardless of UIM's default initialization.
   (
-    source "$SCRIPT_DIR/UIM"
-    use_proj "$_bg_proj"
-    _bg_run_traversal "$log_dir"
+    _BG_PROJ="$PROJ" _BG_LOG_DIR="$log_dir" SCRIPT_DIR="$SCRIPT_DIR" \
+    bash -c '
+      source "$SCRIPT_DIR/UIM"
+      source "$SCRIPT_DIR/commandM.sh"
+      use_proj "$_BG_PROJ"
+      _bg_run_traversal "$_BG_LOG_DIR"
+    '
   ) >> "$log_dir/run.log" 2>&1 &
 
   local bg_pid=$!
@@ -420,6 +493,7 @@ cmd_sort() {
   node_exists "$parent" || { err "node '$parent' not found"; return; }
 
   local children=()
+  local -A _sort_branches=()
   mapfile -t children < <(conn_out "$parent")
   local n=${#children[@]}
 
@@ -430,7 +504,12 @@ cmd_sort() {
   echo ""
   local i
   for (( i=0; i<n; i++ )); do
-    echo -e "  ${GR}${BD}$((i+1)).${RS} ${OR}${children[$i]}${RS}"
+    local br_label=""
+    local br
+    br=$(conn_branch "$parent" "${children[$i]}")
+    [[ "$br" == "true"  ]] && br_label=" ${GR}[true]${RS}"
+    [[ "$br" == "false" ]] && br_label=" ${RE}[false]${RS}"
+    echo -e "  ${GR}${BD}$((i+1)).${RS} ${OR}${children[$i]}${RS}${br_label}"
   done
   echo ""
   echo -e "  ${GL}enter new order as numbers separated by spaces${RS}"
@@ -454,8 +533,16 @@ cmd_sort() {
   done
   [[ $valid -eq 0 ]] && return
 
-  for child in "${children[@]}"; do conn_remove "$parent" "$child"; done
-  for child in "${new_order[@]}"; do conn_add "$parent" "$child" 2>/dev/null; done
+  # collect branch tags before removing, then restore them after reorder
+  for child in "${children[@]}"; do
+    local br
+    br=$(conn_branch "$parent" "$child")
+    conn_remove "$parent" "$child"
+    _sort_branches["$child"]="$br"
+  done
+  for child in "${new_order[@]}"; do
+    conn_add "$parent" "$child" "${_sort_branches[$child]}" 2>/dev/null
+  done
 
   ok "sorted children of ${OR}${parent}${RS}:"
   for (( i=0; i<${#new_order[@]}; i++ )); do
@@ -465,8 +552,69 @@ cmd_sort() {
 }
 
 # ═══════════════════════════════════════════════
-# TREE VIEW
+# CONNECTIONS SUMMARY
+# Prints connected nodes first, then disconnected nodes,
+# separated by a visual divider
 # ═══════════════════════════════════════════════
+_print_connections_summary() {
+  # gather all node names
+  local all_nodes=()
+  mapfile -t all_nodes < <(node_list)
+
+  # track which nodes appear in any connection
+  local -A connected=()
+  local conn_lines=()
+  if [[ -s "$CONNS" ]]; then
+    while IFS=' ' read -r f t branch; do
+      [[ -z "$f" ]] && continue
+      connected["$f"]=1
+      connected["$t"]=1
+      conn_lines+=("$f $t ${branch:-}")
+    done < "$CONNS"
+  fi
+
+  # ── connected section ──
+  echo ""
+  echo -e "  ${GY}────────────────────────────────────────${RS}"
+  echo -e "  ${GY}│${RS} ${GL}connected nodes${RS}"
+  echo -e "  ${GY}────────────────────────────────────────${RS}"
+
+  if [[ ${#conn_lines[@]} -eq 0 ]]; then
+    echo -e "  ${GY}│${RS}  ${WD}(none)${RS}"
+  else
+    for entry in "${conn_lines[@]}"; do
+      local f t branch
+      read -r f t branch <<< "$entry"
+      local blabel=""
+      if [[ "$branch" == "true"  ]]; then blabel=" ${GR}[true]${RS}"
+      elif [[ "$branch" == "false" ]]; then blabel=" ${RE}[false]${RS}"
+      fi
+      echo -e "  ${GY}│${RS}  ${OR}${f}${RS} ${GY}→${RS} ${WH}${t}${RS}${blabel}"
+    done
+  fi
+
+  # ── separator ──
+  echo -e "  ${GY}│${RS}"
+  echo -e "  ${GY}────────────────────────────────────────${RS}"
+  echo -e "  ${GY}│${RS} ${GL}disconnected nodes${RS}"
+  echo -e "  ${GY}────────────────────────────────────────${RS}"
+
+  # ── disconnected section ──
+  local disc_count=0
+  for n in "${all_nodes[@]}"; do
+    if [[ -z "${connected[$n]+_}" ]]; then
+      echo -e "  ${GY}│${RS}  ${RE}✗${RS} ${WD}${n}${RS}"
+      disc_count=$((disc_count+1))
+    fi
+  done
+  [[ $disc_count -eq 0 ]] && echo -e "  ${GY}│${RS}  ${GR}✓ all nodes connected${RS}"
+
+  echo -e "  ${GY}────────────────────────────────────────${RS}"
+  echo ""
+}
+
+# ══════════════════════════════════════════════</longcat_arg_key>
+
 
 _tree_visited=()
 
@@ -495,10 +643,29 @@ tree_node() {
   [[ "$sub" == "script"   ]] && badge=" ${GY}[${BL}${lang}${GY}]${RS}"
   [[ "$sub" == "text"     ]] && badge=" ${GY}[${WD}text${GY}]${RS}"
   [[ "$sub" == "decision" ]] && badge=" ${GY}[${CY}decision${GY}:${BL}${lang}${GY}]${RS}"
+  [[ "$sub" == "variable" ]] && badge=" ${GY}[${MA}variable${GY}:${BL}${lang}${GY}]${RS}"
+  [[ "$sub" == "sleep"   ]] && badge=" ${GY}[${CY}sleep: ${body}s${GY}]${RS}"
+
+  # show import count on script nodes
+  local imp_count=0
+  if [[ "$sub" == "script" || "$sub" == "decision" || "$sub" == "variable" ]]; then
+    local _tb
+    _tb=$(node_body "$id")
+    while IFS= read -r _il; do
+      [[ "$_il" =~ ^[[:space:]]*import[[:space:]]+ ]] && imp_count=$((imp_count+1))
+    done <<< "$_tb"
+  fi
+  [[ $imp_count -gt 0 ]] && badge+=" ${MA}(${imp_count}↓)${RS}"
 
   local outs arrows=""
   mapfile -t outs < <(conn_out "$id")
-  for o in "${outs[@]}"; do arrows+=" ${OD}→${RS}${GL}${o}${RS}"; done
+  for o in "${outs[@]}"; do
+    local br; br=$(conn_branch "$id" "$o")
+    local blabel=""
+    [[ "$br" == "true"  ]] && blabel=" ${GR}[true]${RS}"
+    [[ "$br" == "false" ]] && blabel=" ${RE}[false]${RS}"
+    arrows+=" ${OD}→${RS}${GL}${o}${RS}${blabel}"
+  done
 
   echo -e "  ${GY}${prefix}${branch}${RS} ${tag_s}[${id}]${tag_e}${badge}${arrows}"
   [[ -n "$preview" ]] && echo -e "  ${GY}${child_pre}│${RS}  ${DM}${WD}${preview}${RS}"
@@ -506,6 +673,7 @@ tree_node() {
   local kids=()
   mapfile -t kids < <(conn_out "$id")
   local nk=${#kids[@]}
+  local i
   for (( i=0; i<nk; i++ )); do
     local last=0; [[ $((i+1)) -eq $nk ]] && last=1
     tree_node "${kids[$i]}" "$child_pre" "$last"
@@ -526,7 +694,7 @@ cmd_tree() {
     for r in "${_tree_visited[@]}"; do [[ "$r" == "$n" ]] && seen=1; done
     [[ $seen -eq 0 ]] && tree_node "$n" "" "1"
   done
-  echo ""
+  _print_connections_summary
 }
 
 # ═══════════════════════════════════════════════
@@ -558,9 +726,9 @@ main() {
       switch)         cmd_switch "$arg1" ;;
       projects)       cmd_projects ;;
       rmproj)         cmd_rmproj "$arg1" ;;
-      add)            cmd_add "$arg1" "$arg2" "$rest" ;;
+      add)            cmd_add "$arg1" "$arg2" ${rest:+"$rest"} ;;
       setbody)        cmd_setbody "$arg1" "$arg2 $rest" ;;
-      connect)        cmd_connect "$arg1" "$arg2" "$rest" ;;
+      connect)        cmd_connect "$arg1" "$arg2" ${rest:+"$rest"} ;;
       disconnect)     cmd_disconnect "$arg1" "$arg2" ;;
       edit)           cmd_edit "$arg1" ;;
       show)           cmd_show "$arg1" ;;

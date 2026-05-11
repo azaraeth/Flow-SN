@@ -16,6 +16,7 @@ GY='\033[38;5;240m'   # grey
 WH='\033[38;5;255m'   # white
 WD='\033[38;5;250m'   # white dim
 CY='\033[38;5;87m'    # cyan — decision nodes
+MA='\033[38;5;129m'   # magenta — variable nodes
 BD='\033[1m'
 DM='\033[2m'
 RS='\033[0m'
@@ -32,11 +33,42 @@ use_proj() {
     touch "$CONNS"
 }
 
-# ── migrate legacy flat structure on first run ──
+# ── Node name validation ────────────────────────
+# Only allow alphanumeric, underscore, and hyphen.
+# Must not be empty, must not start with a hyphen,
+# must not contain path separators or dots (no path traversal).
+validate_node_name() {
+  local name="$1"
+  if [[ -z "$name" ]]; then
+    err "node name cannot be empty"
+    return 1
+  fi
+  if [[ "$name" =~ [^a-zA-Z0-9_-] ]]; then
+    err "node name '$name' contains invalid characters — only a-z, A-Z, 0-9, _, - are allowed"
+    return 1
+  fi
+  if [[ "$name" =~ ^- ]]; then
+    err "node name '$name' must not start with a hyphen"
+    return 1
+  fi
+  if [[ "$name" == "." || "$name" == ".." ]]; then
+    err "node name '$name' is not allowed"
+    return 1
+  fi
+  return 0
+}
 migrate_legacy() {
-    [[ -d "$DATA/nodes" && ! -d "$DATA/project1" ]] || return
+    # old structure: ~/.flowterm/nodes/ and ~/.flowterm/connections
+    # new structure: ~/.flowterm/project1/nodes/ and ~/.flowterm/project1/connections
+    # migrate if old structure exists and new structure is not yet set up
+    local has_old=0
+    [[ -d "$DATA/nodes" ]] && has_old=1
+    [[ -f "$DATA/connections" ]] && has_old=1
+    [[ $has_old -eq 0 ]] && return
+    # only migrate if project1 hasn't already been set up in the new layout
+    [[ -d "$DATA/project1/nodes" ]] && return
     mkdir -p "$DATA/project1"
-    mv "$DATA/nodes" "$DATA/project1/nodes"
+    [[ -d "$DATA/nodes" ]] && mv "$DATA/nodes" "$DATA/project1/nodes"
     [[ -f "$DATA/connections" ]] && mv "$DATA/connections" "$DATA/project1/connections"
     touch "$DATA/project1/connections"
 }
@@ -70,8 +102,8 @@ banner() {
   echo -e "     ╚════██║██║╚██╗██║╚════╝██╔══╝  ██║     ██║   ██║██║███╗██║"
   echo -e "     ███████║██║ ╚████║      ██║     ███████╗╚██████╔╝╚███╔███╔╝"
   echo -e "     ╚══════╝╚═╝  ╚═══╝      ╚═╝     ╚══════╝ ╚═════╝  ╚══╝╚══╝ "
-  echo -e "     V1.0 BETA-OPENSOURCE"
-  echo -e "────────────────────────────────────────────────────────────────────"                                         
+  echo -e "     V1.2.4 OPENSOURCE"
+  echo -e "────────────────────────────────────────────────────────────────────"
   echo -e "     ⬡  sn-flow${RS}${WD}${RS}${OR}${BD}  ·  workflow runner"
   echo -e "        ${RS}${GL}Created by : Azaraeth${RS}${OR}${BD} ${RS}"
   echo -e "────────────────────────────────────────────────────────────────────"
@@ -99,17 +131,23 @@ node_lang()    { sed -n '3p' "$NODES/$1.node" 2>/dev/null; }
 node_body()    { tail -n +4 "$NODES/$1.node" 2>/dev/null; }
 
 node_save() {
-  local name="$1" type="$2" sub="$3" lang="$4"
-  shift 4
-  printf '%s\n%s\n%s\n%s\n' "$type" "$sub" "$lang" "$*" > "$NODES/$name.node"
+  local name="$1" type="$2" sub="$3" lang="$4" body="$5"
+  printf '%s\n%s\n%s\n' "$type" "$sub" "$lang" > "$NODES/$name.node"
+  if [[ -n "$body" ]]; then
+    printf '%s\n' "$body" >> "$NODES/$name.node"
+  fi
 }
 
 node_list() { ls "$NODES"/*.node 2>/dev/null | xargs -I{} basename {} .node; }
 
 node_delete() {
   rm -f "$NODES/$1.node"
-  grep -v "^$1 \|^[^ ]* $1$" "$CONNS" > "$CONNS.tmp" 2>/dev/null
-  mv "$CONNS.tmp" "$CONNS"
+  # remove connections where $1 is source (col 1) or target (col 2)
+  # connections format: "from to [branch]"
+  if [[ -f "$CONNS" ]]; then
+    awk -v n="$1" '$1 != n && $2 != n' "$CONNS" > "$CONNS.tmp" 2>/dev/null
+    mv "$CONNS.tmp" "$CONNS"
+  fi
 }
 
 require_init() {
@@ -127,11 +165,23 @@ conn_add() {
 
 conn_remove() {
   # removes any connection from $1 to $2 regardless of branch tag
-  grep -v "^$1 $2\( .*\)\?$" "$CONNS" > "$CONNS.tmp" 2>/dev/null
+  if [[ ! -f "$CONNS" ]]; then
+    warn "no connections file"
+    return 1
+  fi
+  # check if connection exists before removing
+  if ! grep -q "^$1 $2" "$CONNS" 2>/dev/null; then
+    warn "no connection: $1 → $2"
+    return 1
+  fi
+  awk -v f="$1" -v t="$2" '$1 != f || $2 != t' "$CONNS" > "$CONNS.tmp" 2>/dev/null
   mv "$CONNS.tmp" "$CONNS"
 }
 
 # conn_out <node>          — all children regardless of branch
+#                            NOTE: for decision nodes, prefer passing "true" or "false"
+#                            to avoid mixing branches. Callers like run_node handle
+#                            branching explicitly and use the branch-filtered form.
 # conn_out <node> true     — only true-branch children
 # conn_out <node> false    — only false-branch children
 conn_out() {
@@ -143,7 +193,156 @@ conn_out() {
   fi
 }
 
-conn_in()  { grep " $1 \| $1$" "$CONNS" 2>/dev/null | awk '{print $1}'; }
+conn_in()  { awk -v n="$1" '$2 == n {print $1}' "$CONNS" 2>/dev/null; }
 
 # returns the branch tag for a specific connection (true/false/empty)
 conn_branch() { grep "^$1 $2" "$CONNS" 2>/dev/null | awk '{print $3}'; }
+
+# ═══════════════════════════════════════════════
+# IMPORT RESOLUTION HELPERS
+# ═══════════════════════════════════════════════
+#
+# Variable nodes (subtype=variable) store reusable code (assignments,
+# functions, constants). Their body is injected raw.
+#
+# Decision nodes (subtype=decision) store condition scripts. When imported,
+# their body is wrapped in a callable function so the importing script can
+# call it and branch on the result.
+#
+# Both are referenced with:  import <name>
+# Language must match between the imported node and the importing script.
+
+# var_exists <name> — returns 0 if a variable node with this name exists
+var_exists() {
+  node_exists "$1" && [[ "$(node_subtype "$1")" == "variable" ]]
+}
+
+# dec_exists <name> — returns 0 if a decision node with this name exists
+dec_exists() {
+  node_exists "$1" && [[ "$(node_subtype "$1")" == "decision" ]]
+}
+
+# resolve_imports <script_body> <lang>
+# Scans script for "import <name>" lines, resolves matching variable or
+# decision nodes of the same language, and returns the combined code with
+# injected bodies prepended. Flow-SN import directives are stripped from
+# the output.
+#
+# Variable nodes: body is injected raw.
+# Decision nodes: body is wrapped in a callable function that returns
+#   a truthy/falsy value. The wrapper is language-appropriate:
+#     python3  → def <name>(): ... (captures stdout via io.StringIO, returns bool)
+#     bash     → <name>() { _out=$( ... ); [[ $_out == "true" ]] && return 0 || return 1; }
+#     node     → function <name>() { ... capture process.stdout.write ... }
+#     ruby     → def <name> ... capture $stdout via StringIO ... end
+# Output: resolved script body on stdout
+resolve_imports() {
+  local body="$1" lang="$2"
+  local injected=""
+
+  while IFS= read -r line; do
+    if [[ "$line" =~ ^[[:space:]]*import[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*) ]]; then
+      local imp_name="${BASH_REMATCH[1]}"
+
+      if var_exists "$imp_name"; then
+        # ── inject variable node body raw ──
+        local imp_lang
+        imp_lang=$(node_lang "$imp_name")
+        if [[ "$imp_lang" == "$lang" ]]; then
+          local imp_body
+          imp_body=$(node_body "$imp_name")
+          injected+="# ── import variable: $imp_name ──"$'\n'
+          injected+="$imp_body"$'\n'
+        else
+          injected+="# ── import variable: $imp_name (SKIPPED — lang mismatch: $imp_lang vs $lang) ──"$'\n'
+        fi
+
+      elif dec_exists "$imp_name"; then
+        # ── inject decision node body wrapped as a callable function ──
+        local imp_lang
+        imp_lang=$(node_lang "$imp_name")
+        if [[ "$imp_lang" == "$lang" ]]; then
+          local imp_body
+          imp_body=$(node_body "$imp_name")
+          case "$lang" in
+            python|python3)
+              injected+="# ── import decision: $imp_name ──"$'\n'
+              injected+="def ${imp_name}():"$'\n'
+              injected+="    import io, sys"$'\n'
+              injected+="    _old = sys.stdout"$'\n'
+              injected+="    sys.stdout = io.StringIO()"$'\n'
+              while IFS= read -r dline; do
+                injected+="    ${dline}"$'\n'
+              done <<< "$imp_body"
+              injected+="    _out = sys.stdout.getvalue().strip()"$'\n'
+              injected+="    sys.stdout = _old"$'\n'
+              injected+="    return _out == \"true\""$'\n'
+              injected+=$'\n'
+              ;;
+            bash|sh)
+              injected+="# ── import decision: $imp_name ──"$'\n'
+              injected+="${imp_name}() {"$'\n'
+              injected+="    local _flow_dec_out"$'\n'
+              injected+="    _flow_dec_out=\$("$'\n'
+              while IFS= read -r dline; do
+                injected+="        ${dline}"$'\n'
+              done <<< "$imp_body"
+              injected+="    )"$'\n'
+              injected+="    [[ \"\${_flow_dec_out}\" == \"true\" ]] && return 0 || return 1"$'\n'
+              injected+="}"$'\n'
+              injected+=$'\n'
+              ;;
+            node|nodejs|js)
+              injected+="// ── import decision: $imp_name ──"$'\n'
+              injected+="function ${imp_name}() {"$'\n'
+              injected+="    const _old = process.stdout.write;"$'\n'
+              injected+="    let _out = '';"$'\n'
+              injected+="    process.stdout.write = (d) => { _out += d; };"$'\n'
+              while IFS= read -r dline; do
+                injected+="    ${dline}"$'\n'
+              done <<< "$imp_body"
+              injected+="    process.stdout.write = _old;"$'\n'
+              injected+="    return _out.trim() === 'true';"$'\n'
+              injected+="}"$'\n'
+              injected+=$'\n'
+              ;;
+            ruby)
+              injected+="# ── import decision: $imp_name ──"$'\n'
+              injected+="def ${imp_name}"$'\n'
+              injected+="    require 'stringio'"$'\n'
+              injected+="    _old = \$stdout"$'\n'
+              injected+="    \$stdout = StringIO.new"$'\n'
+              while IFS= read -r dline; do
+                injected+="    ${dline}"$'\n'
+              done <<< "$imp_body"
+              injected+="    _out = \$stdout.string.strip"$'\n'
+              injected+="    \$stdout = _old"$'\n'
+              injected+="    _out == 'true'"$'\n'
+              injected+="end"$'\n'
+              injected+=$'\n'
+              ;;
+            *)
+              injected+="# (unsupported language for decision import: $lang)"$'\n'
+              ;;
+          esac
+        else
+          injected+="# ── import decision: $imp_name (SKIPPED — lang mismatch: $imp_lang vs $lang) ──"$'\n'
+        fi
+
+      else
+        injected+="# ── import: $imp_name (NOT FOUND) ──"$'\n'
+      fi
+    fi
+  done <<< "$body"
+
+  # append the original script body, stripping Flow-SN import directives
+  while IFS= read -r line; do
+    if [[ "$line" =~ ^[[:space:]]*import[[:space:]]+[a-zA-Z_][a-zA-Z0-9_]* ]]; then
+      continue
+    fi
+    injected+="${line}"$'\n'
+  done <<< "$body"
+  injected="${injected%$'\n'}"
+
+  echo "$injected"
+}

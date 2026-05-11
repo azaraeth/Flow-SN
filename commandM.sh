@@ -13,6 +13,7 @@ source "$SCRIPT_DIR/UIM"
 
 cmd_init() {
   local name="${1:-project1}"
+  validate_node_name "$name" || return
   use_proj "$name"
   node_exists "start" && { warn "project '$PROJ' already initialized"; return; }
   node_save "start" "start"   "passthrough" "-" ""
@@ -24,19 +25,43 @@ cmd_init() {
 
 cmd_add() {
   require_init || return
-  local name="$1" sub="${2:-passthrough}" lang="${3:-bash}"
-  [[ -z "$name" ]] && { err "usage: add <name> [passthrough|text|script|decision] [lang]"; return; }
+  local name="$1" sub="${2:-passthrough}" lang="${3:-}"
+  [[ -z "$name" ]] && { err "usage: add <name> [passthrough|text|script|decision|variable|sleep] [lang|duration]"; return; }
+  validate_node_name "$name" || return
   node_exists "$name" && { err "node '$name' exists"; return; }
   if [[ "$sub" == "decision" ]]; then
     # decision nodes always have a language for their condition script
+    [[ -z "$lang" ]] && lang="bash"
     node_save "$name" "command" "decision" "$lang" ""
     ok "added: ${CY}${name}${RS}  ${GY}[${CY}decision${GY}:${BL}${lang}${GY}]${RS}"
     info "set condition with: setbody $name <code>"
     info "connect branches : connect $name <node> true / false"
+  elif [[ "$sub" == "variable" ]]; then
+    # variable nodes store reusable code (assignments, functions, etc.)
+    [[ -z "$lang" ]] && lang="bash"
+    node_save "$name" "command" "variable" "$lang" ""
+    ok "added: ${MA}${name}${RS}  ${GY}[${MA}variable${GY}:${BL}${lang}${GY}]${RS}"
+    info "set body with: setbody $name <code>"
+    info "use in scripts  : import $name"
+  elif [[ "$sub" == "sleep" ]]; then
+    # sleep nodes pause execution for a given duration (seconds, int/float)
+    local bdy="${lang:-0}"
+    node_save "$name" "command" "sleep" "-" "$bdy"
+    ok "added: ${OR}${name}${RS}  ${GY}[sleep: ${bdy}s${GY}]${RS}"
+    info "adjust duration: setbody $name <seconds>"
   else
+    # validate sub type
+    case "$sub" in
+      passthrough|text|script) ;;
+      *) err "unknown subtype '$sub' — use: passthrough|text|script|decision|variable|sleep"; return ;;
+    esac
     [[ "$sub" != "script" ]] && lang="-"
     node_save "$name" "command" "$sub" "$lang" ""
-    ok "added: ${OR}${name}${RS}  [${sub}$([ "$sub" = "script" ] && echo ":${lang}")]"
+    if [[ "$sub" == "script" ]]; then
+      ok "added: ${OR}${name}${RS}  ${GY}[${sub}:${BL}${lang}${GY}]${RS}"
+    else
+      ok "added: ${OR}${name}${RS}  ${GY}[${sub}${GY}]${RS}"
+    fi
     info "set body with: setbody $name <content>"
   fi
 }
@@ -79,8 +104,11 @@ cmd_disconnect() {
   require_init || return
   local f="$1" t="$2"
   [[ -z "$f" || -z "$t" ]] && { err "usage: disconnect <from> <to>"; return; }
-  conn_remove "$f" "$t"
-  ok "disconnected: $f → $t"
+  node_exists "$f" || { err "node '$f' not found"; return; }
+  node_exists "$t" || { err "node '$t' not found"; return; }
+  if conn_remove "$f" "$t"; then
+    ok "disconnected: $f → $t"
+  fi
 }
 
 cmd_show() {
@@ -103,8 +131,21 @@ cmd_show() {
     fb=$(conn_out "$name" "false" | tr '\n' ' ')
     echo -e "  ${GL}true →   ${RS}${GR}${tb:-none}${RS}"
     echo -e "  ${GL}false →  ${RS}${RE}${fb:-none}${RS}"
-  elif [[ "$sub" == "script" ]]; then
+  elif [[ "$sub" == "script" || "$sub" == "variable" ]]; then
     echo -e "  ${GL}lang     ${RS}${BL}${lang}${RS}"
+  fi
+
+  # show imports used by this node (script/decision/variable)
+  if [[ "$sub" == "script" || "$sub" == "decision" || "$sub" == "variable" ]]; then
+    local imports=()
+    while IFS= read -r iline; do
+      if [[ "$iline" =~ ^[[:space:]]*import[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*) ]]; then
+        imports+=("${BASH_REMATCH[1]}")
+      fi
+    done <<< "$body"
+    if [[ ${#imports[@]} -gt 0 ]]; then
+      echo -e "  ${GL}imports  ${RS}${MA}${imports[*]}${RS}"
+    fi
   fi
 
   local outs ins
@@ -146,12 +187,17 @@ cmd_list() {
           type=$(node_type "$n"); sub=$(node_subtype "$n"); lang=$(node_lang "$n")
           [[ "$sub" == "script" ]] && badge="${GY}[${BL}${lang}${GY}]${RS}"
           [[ "$sub" == "text"   ]] && badge="${GY}[${WD}text${GY}]${RS}"
+          [[ "$sub" == "variable" ]] && badge="${GY}[${MA}variable${GY}:${BL}${lang}${GY}]${RS}"
+          [[ "$sub" == "sleep"   ]] && badge="${GY}[${CY}sleep: ${body}s${GY}]${RS}"
           printf "    ${OR}%-18s${RS} ${GL}%-14s${RS} %b\n" "$n" "$type" "$badge"
         done
         if [[ -s "$CONNS" ]]; then
-          while IFS=' ' read -r f t; do
+          while IFS=' ' read -r f t branch; do
             [[ -z "$f" ]] && continue
-            echo -e "    ${OR}${f}${RS} ${GY}→${RS} ${OD}${t}${RS}"
+            local blabel=""
+            [[ "$branch" == "true"  ]] && blabel=" ${GR}[true]${RS}"
+            [[ "$branch" == "false" ]] && blabel=" ${RE}[false]${RS}"
+            echo -e "    ${OR}${f}${RS} ${GY}→${RS} ${OD}${t}${RS}${blabel}"
           done < "$CONNS"
         fi
       fi
@@ -174,6 +220,7 @@ cmd_list() {
     [[ "$sub" == "script"   ]] && badge="${GY}[${BL}${lang}${GY}]${RS}"
     [[ "$sub" == "text"     ]] && badge="${GY}[${WD}text${GY}]${RS}"
     [[ "$sub" == "decision" ]] && badge="${GY}[${CY}decision${GY}:${BL}${lang}${GY}]${RS}"
+    [[ "$sub" == "variable" ]] && badge="${GY}[${MA}variable${GY}:${BL}${lang}${GY}]${RS}"
     printf "  ${OR}%-18s${RS} ${GL}%-14s${RS} %b\n" "$n" "$type" "$badge"
   done
 
@@ -269,7 +316,7 @@ cmd_edit() {
   type=$(node_type "$name"); sub=$(node_subtype "$name"); lang=$(node_lang "$name")
 
   hdr "edit: $name"
-  echo -ne "  ${GL}subtype [passthrough/script/text/decision] (enter=keep '${sub}'): ${RS}"
+  echo -ne "  ${GL}subtype [passthrough/script/text/decision/variable/sleep] (enter=keep '${sub}'): ${RS}"
   read -r ns; [[ -z "$ns" ]] && ns="$sub"
 
   local nl="-"
@@ -306,7 +353,7 @@ cmd_export() {
   hdr "export → $out"
   local visited_e=()
   {
-    echo "#!/data/data/com.termux/files/usr/bin/bash"
+    echo "#!/usr/bin/env bash"
     echo "# exported by flow.sh"
     echo ""
 
@@ -318,9 +365,20 @@ cmd_export() {
       t=$(node_type "$id"); s=$(node_subtype "$id")
       lg=$(node_lang "$id"); b=$(node_body "$id")
       if [[ "$t" == "command" && "$s" == "script" && -n "$b" ]]; then
-        echo "# ── $id [$lg] ──"; echo "$b"; echo ""
+        echo "# ── $id [$lg] ──"
+        # resolve imports so exported script is self-contained
+        resolve_imports "$b" "$lg"
+        echo ""
+      elif [[ "$t" == "command" && "$s" == "variable" && -n "$b" ]]; then
+        echo "# ── variable: $id [$lg] ──"; echo "$b"; echo ""
+      elif [[ "$t" == "command" && "$s" == "decision" && -n "$b" ]]; then
+        echo "# ── decision: $id [$lg] ──"; echo "$b"; echo ""
       elif [[ "$t" == "command" && "$s" == "text" && -n "$b" ]]; then
-        echo "# ── $id [text] ──"; echo "echo \"$b\""; echo ""
+        echo "# ── $id [text] ──"; echo "\"$b\""; echo ""
+      elif [[ "$t" == "command" && "$s" == "sleep" ]]; then
+        echo "# ── $id [sleep: ${b}s] ──"
+        echo "sleep $b"
+        echo ""
       fi
       mapfile -t kids < <(conn_out "$id")
       for k in "${kids[@]}"; do exp_node "$k"; done
@@ -343,7 +401,7 @@ cmd_help() {
   local cmds=(
     "init [name]"               "create a new project with start + end nodes"
     "switch <project>"          "switch to an existing project"
-    "add <name> [sub] [lang]"   "add a node  (sub: passthrough|text|script|decision)"
+    "add <name> [sub] [lang]"   "add a node  (sub: passthrough|text|script|decision|variable|sleep)"
     "setbody <name> <content>"  "set a node's body (inline)"
     "edit <name>"               "edit subtype, lang, and body — supports decision nodes"
     "connect <from> <to> [t|f]" "link nodes — decision nodes require true or false branch"
@@ -377,6 +435,7 @@ cmd_help() {
   echo -e "  ${GL}setbody fetch echo Hello world${RS}"
   echo -e "  ${GL}add log text${RS}"
   echo -e "  ${GL}setbody log done!${RS}"
+  echo -e "  ${GL}add wait sleep 2${RS}"
   echo -e "  ${GL}connect start fetch${RS}"
   echo -e "  ${GL}connect fetch log${RS}"
   echo -e "  ${GL}connect log end${RS}"

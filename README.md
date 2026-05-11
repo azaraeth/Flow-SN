@@ -2,7 +2,7 @@
 
 > A terminal-based workflow runner for Termux on Android and Linux. Build pipelines, connect nodes, execute everything — fully offline, no cloud, no dependencies beyond bash.
 
-**v1.2.3** · Created by [Azaraeth](https://github.com/azaraeth)
+**v1.2.5** · Created by [Azaraeth](https://github.com/azaraeth)
 
 ---
 
@@ -20,6 +20,8 @@ No internet. No cloud. Just your scripts, running the way you designed them.
 
 - **Fully offline** — no network calls, no external services
 - **Multi-language nodes** — bash, python3, node, and ruby out of the box
+- **Variable nodes** — store reusable code (assignments, functions, constants) and import them into script nodes with `import <name>`
+- **Decision imports** — import decision nodes as callable functions in any supported language
 - **Decision nodes** — branch your workflow with true/false conditions in any supported language
 - **Fire-and-forget execution** — long-running scripts detach automatically, flow never stalls
 - **Loop detection** — looping scripts get a live peek (up to 5 lines) then run detached
@@ -103,11 +105,11 @@ run
 
 | Command | Description |
 |---|---|
-| `add <name> [sub] [lang]` | Add a node — sub: `passthrough`, `text`, `script`, `decision` |
-| `setbody <name> <content>` | Set a node's body inline |
-| `edit <name>` | Interactively edit a node's subtype, lang, and body |
-| `show <name>` | Inspect a node's full details |
-| `delete <name>` | Remove a node |
+| `add <name> [sub] [lang]` | Add a node — sub: `passthrough`, `text`, `script`, `decision`, `variable` |
+|| `setbody <name> <content>` | Set a node's body inline |
+|| `edit <name>` | Interactively edit a node's subtype, lang, and body |
+|| `show <name>` | Inspect a node's full details |
+|| `delete <name>` | Remove a node |
 
 ### Connections
 
@@ -191,6 +193,114 @@ A missing branch is silently skipped — no crash, flow continues. Each branch r
 
 ---
 
+### `variable`
+
+Stores reusable code (assignments, functions, constants, etc.) in a given language. Other script nodes can import it with `import <name>`. When a script node runs, Flow-SN resolves all `import` lines, reads the matching variable node bodies, and prepends them to the script — but only if the variable's language matches the script's language.
+
+```bash
+add config variable python3
+setbody config
+name = "hello"
+count = 42
+flag = True
+END
+```
+
+Use it in another script node of the same language. Note: variable bodies are injected as raw code, so you reference the variables directly by name (not as `<node_name>.<var>`):
+
+```bash
+add greet script python3
+setbody greet
+import config
+print(name)
+print(count + 1)
+END
+```
+
+At execution time, the script effectively becomes:
+
+```python
+# ── import variable: config ──
+name = "hello"
+count = 42
+flag = True
+import config
+print(name)
+print(count + 1)
+```
+
+- **Language matching:** If the variable's language doesn't match the script's language, the import is skipped with a comment annotation — no crash.
+- **Not found:** If the imported variable doesn't exist, a comment annotation is injected — no crash.
+- **Not a workflow step:** Variable nodes are never traversed during `run` or `tree`. They exist purely as reusable code libraries.
+- **Editable:** Change a variable's body at any time; all scripts using it see the new values on next run.
+
+---
+
+### Importing decision nodes
+
+Decision nodes can also be imported into script nodes with `import <name>`. When imported, the decision's condition body is wrapped in a callable function so the script can invoke it and branch on the result.
+
+```bash
+add is_prod decision python3
+setbody is_prod
+import os
+print("true" if os.getenv("ENV") == "production" else "false")
+END
+```
+
+Import and use it in a script node of the same language:
+
+```bash
+add deploy script python3
+setbody deploy
+import is_prod
+if is_prod():
+    print("Deploying to production!")
+END
+```
+
+At execution time, the decision body is wrapped as a callable function that captures stdout and returns a boolean. For Python the injected code looks like:
+
+```python
+# ── import decision: is_prod ──
+def is_prod():
+    import io, sys
+    _old = sys.stdout
+    sys.stdout = io.StringIO()
+    import os
+    print("true" if os.getenv("ENV") == "production" else "false")
+    _out = sys.stdout.getvalue().strip()
+    sys.stdout = _old
+    return _out == "true"
+```
+
+The function wraps the decision's original body, captures its stdout (which prints `"true"` or `"false"`), and returns a boolean the caller can use directly.
+
+The same pattern works for all supported languages — the wrapper captures stdout and returns a truthy/falsy value:
+
+| Language | Wrapper style | Call style |
+|---|---|---|
+| python3 | `def <name>():` captures stdout via `io.StringIO`, returns `bool` | `if <name>():` |
+| bash/sh | `<name>() { _out=$( ... ); [[ $_out == "true" ]] && return 0 \|\| return 1; }` | `if <name>; then` |
+| node/js | `function <name>() {` captures `process.stdout.write`, returns `boolean` | `if (<name>())` |
+| ruby | `def <name>` captures `$stdout` via `StringIO`, returns `bool` | `if <name}` |
+
+- **Language matching:** Same as variables — the decision's language must match the script's language.
+- **Not found:** A comment annotation is injected — no crash.
+- **Combining imports:** You can import both variable and decision nodes in the same script:
+  ```bash
+  add deploy script python3
+  setbody deploy
+  import config
+  import is_prod
+  if is_prod():
+      print(f"Deploying {name} to production!")
+  END
+  ```
+  (Remember: variable bodies are injected raw, so use `name` not `config.name`.)
+
+---
+
 ## Sorting Execution Order
 
 Children of a node execute in the order they were connected. To change the order:
@@ -255,6 +365,19 @@ clean                       # remove all finished runs
 ---
 
 ## Changelog
+
+### v1.2.4
+- **sort now shows branch labels** — `[true]` / `[false]` tags are displayed next to each child in the sort prompt so you can see which branch each child belongs to before reordering
+- **sort preserves branch tags** — reordering a decision node's children no longer drops the `true`/`false` branch associations (bug fix)
+- **list --all now shows branch tags** — the `--all` flag now displays `[true]` / `[false]` labels on decision node connections, matching the behavior of the regular `list` command
+- **tree view now shows branch labels** — decision node children in the tree view now display `[true]` / `[false]` tags next to each child arrow
+- **runbg uses snapshot isolation** — background runs now read node data and connections from a private snapshot at launch time, so editing nodes while a background run is in progress no longer affects the running workflow
+- **export uses portable shebang** — exported workflows now use `#!/usr/bin/env bash` instead of the hardcoded Termux path, so they run on any Linux system (bug fix)
+- **node_delete uses exact field matching** — deleting a node no longer risks affecting connections of other nodes with similar names (e.g. deleting "check" would not accidentally affect "mycheck") (bug fix)
+- **conn_in uses exact field matching** — same fix as node_delete for the reverse lookup
+- **migrate_legacy improved** — migration from the old flat file structure now checks for the `project1/nodes` directory specifically, not just `project1`, preventing skipped migrations
+- **conn_out documentation** — added a note that callers should pass `"true"` or `"false"` for decision nodes to avoid mixing branches
+- **Banner version updated** — now shows `V1.2.3 OPENSOURCE` to match the actual release version
 
 ### v1.2.3
 - Root detection on startup — shows `⬡ root access detected` if running as root or with passwordless sudo
